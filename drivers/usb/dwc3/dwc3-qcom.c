@@ -81,6 +81,7 @@ struct dwc3_qcom {
 	enum usb_dr_mode	mode;
 	bool			is_suspended;
 	bool			pm_suspended;
+	bool			loses_state;
 	struct icc_path		*icc_path_ddr;
 	struct icc_path		*icc_path_apps;
 
@@ -407,6 +408,9 @@ static int dwc3_qcom_resume(struct dwc3_qcom *qcom, bool wakeup)
 				  PWR_EVNT_LPM_IN_L2_MASK | PWR_EVNT_LPM_OUT_L2_MASK);
 	}
 
+	if (qcom->loses_state && qcom->current_role == USB_ROLE_DEVICE)
+		dwc3_qcom_vbus_override_enable(qcom, true);
+
 	qcom->is_suspended = false;
 
 	return 0;
@@ -723,6 +727,13 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
 	probe_data.res = &res;
 	probe_data.ignore_clocks_and_resets = true;
 	probe_data.properties = DWC3_DEFAULT_PROPERTIES;
+	/* X1E dwc3 controllers lose their state when CX collapses. */
+	qcom->loses_state = of_device_is_compatible(dev->of_node, "qcom,x1e80100-dwc3") ||
+			    of_device_is_compatible(dev->of_node, "qcom,x1e80100-dwc3-mp");
+	if (qcom->loses_state) {
+		probe_data.properties.needs_full_reinit = true;
+		probe_data.properties.xhci_reset_on_resume = true;
+	}
 	ret = dwc3_core_probe(&probe_data);
 	if (ret)  {
 		ret = dev_err_probe(dev, ret, "failed to register DWC3 Core\n");
